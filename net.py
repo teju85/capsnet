@@ -65,8 +65,9 @@ class Reconstructor(nn.Module):
         return x
 
 def squash(x, dim=-1):
-    norm2 = x.pow(2).sum(dim=dim, keepdim=True)
-    scale = norm2 / (1 + norm2) / norm2.sqrt()
+    norm = x.norm(dim=dim, keepdim=True)
+    norm2 = norm * norm
+    scale = norm2 / (1 + norm2) / norm
     x = scale * x
     return x
 
@@ -190,8 +191,8 @@ def train(epoch_id, model, loader, loss, optimizer, recon):
         loss_val += lval.data[0]
         _, pred = output[0].data.max(dim=-1)  # argmax
         accuracy += pred.eq(label.data.view_as(pred)).sum()
-        print("Train epoch:%d idx=%d time(s):%.3f loss=%.8f accuracy:%.4f" % \
-              (epoch_id, idx, 0, loss_val, accuracy))
+        # print("Train epoch:%d idx=%d time(s):%.3f loss=%.8f accuracy:%.4f" % \
+        #       (epoch_id, idx, 0, loss_val, accuracy))
     loss_val /= len(loader.dataset)
     accuracy /= len(loader.dataset)
     total = time.time() - start
@@ -252,7 +253,7 @@ if __name__ == "__main__":
     model = CapsuleNetwork(args.detach)
     if torch.cuda.is_available():
         model.cuda()
-    loss = MarginLoss(0.9, 0.5, 0.1, 0.0005)
+    loss = MarginLoss(0.9, 0.5, 0.1, 0.0005*28*28)
     if args.adam:
         optimizer = Adam(model.parameters(), lr=args.lr)
     else:
