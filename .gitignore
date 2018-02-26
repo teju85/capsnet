@@ -1,3 +1,5 @@
 mnist/
 core
 __pycache__/
+logs/
+

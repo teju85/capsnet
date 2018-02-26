@@ -8,7 +8,7 @@ from torchvision.datasets import MNIST
 from torchvision.transforms import ToTensor
 from torch.autograd import Variable
 import time
-from torch.optim import SGD
+from torch.optim import Adam, SGD
 import math
 
 def get_datasets(root):
@@ -214,20 +214,27 @@ if __name__ == "__main__":
     import argparse
     print("Parsing args...")
     parser = argparse.ArgumentParser(description="Capsnet Benchmarking")
+    parser.add_argument("-adam", default=False, action="store_true",
+                        help="Use ADAM as the optimizer (Default SGD)")
     parser.add_argument("-batch-size", type=int, default=128,
                         help="Input batch size for training")
     parser.add_argument("-epoch", type=int, default=10, help="Training epochs")
     parser.add_argument("-lr", type=float, default=0.1, help="Learning Rate")
-    parser.add_argument("-mom", type=float, default=0.9, help="Momentum")
+    parser.add_argument("-mom", type=float, default=0.9,
+                        help="Momentum (SGD only)")
     parser.add_argument("-recon", default=False, action="store_true",
                         help="Enable reconstruction loss")
     parser.add_argument("-root", type=str, default="mnist",
                         help="Directory where to download the mnist dataset")
+    parser.add_argument("-seed", type=int, default=12345,
+                        help="Random seed for number generation")
     parser.add_argument("-shuffle", default=False, action="store_true",
                         help="To shuffle inputs during training/testing or not")
     parser.add_argument("-test-batch-size", type=int, default=256,
                         help="Input batch size for testing")
     args = parser.parse_args()
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
     print("Loading datasets...")
     trainset, testset = get_datasets(args.root)
     train_loader, test_loader = get_loaders(trainset, testset, args.batch_size,
@@ -237,7 +244,10 @@ if __name__ == "__main__":
     if torch.cuda.is_available():
         model.cuda()
     loss = MarginLoss(0.9, 0.5, 0.1, 0.0005)
-    optimizer = SGD(model.parameters(), lr=args.lr, momentum=args.mom)
+    if args.adam:
+        optimizer = Adam(model.parameters(), lr=args.lr)
+    else:
+        optimizer = SGD(model.parameters(), lr=args.lr, momentum=args.mom)
     print("Training loop...")
     for idx in range(0, args.epoch):
         train(idx, model, train_loader, loss, optimizer, args.recon)
