@@ -90,7 +90,7 @@ class ConvCapsule(nn.Module):
         return out
 
 class Capsule(nn.Module):
-    def __init__(self, nOutCaps, outCapsDim, nInCaps, inCapsDim, nRouting):
+    def __init__(self, nOutCaps, outCapsDim, nInCaps, inCapsDim, nRouting, detach):
         super(Capsule, self).__init__()
         self.nOutCaps = nOutCaps
         self.outCapsDim = outCapsDim
@@ -98,6 +98,7 @@ class Capsule(nn.Module):
         self.inCapsDim = inCapsDim
         self.r = nRouting
         self.W = nn.Parameter(torch.randn(nInCaps, inCapsDim, nOutCaps * outCapsDim))
+        self.detach = detach
         stdv = 1. / math.sqrt(nInCaps)
         self.W.data.uniform_(-stdv, stdv)
 
@@ -105,28 +106,33 @@ class Capsule(nn.Module):
         b = Variable(torch.zeros(u.size(0), self.nInCaps, self.nOutCaps))
         if torch.cuda.is_available():
             b = b.cuda()
-        u1 = u.unsqueeze(dim=2)
-        uhat = u1.matmul(self.W)
+        u1 = u.unsqueeze(dim=-1)
+        #uhat = u1.matmul(self.W)
+        uhat = torch.sum(u1 * self.W, dim=2)
         uhat = uhat.view(uhat.size(0), self.nInCaps, self.nOutCaps, self.outCapsDim)
+        uhat_d = uhat.detach() if self.detach else uhat
         for i in range(self.r):
             c = F.softmax(b, dim=-1)
-            c = c.unsqueeze(3)
-            s = torch.sum(c * uhat, dim=1)
+            c = c.unsqueeze(-1)
+            if i == self.r - 1:
+                s = torch.sum(c * uhat, dim=1)
+            else:
+                s = torch.sum(c * uhat_d, dim=1)
             v = squash(s)
             if i != self.r - 1:
                 v1 = v.unsqueeze(1)
-                a = torch.sum(uhat * v1, dim=-1)
+                a = torch.sum(uhat_d * v1, dim=-1)
                 b = b + a
         return v
 
 class CapsuleNetwork(nn.Module):
-    def __init__(self):
+    def __init__(self, detach):
         super(CapsuleNetwork, self).__init__()
         self.c1 = nn.Conv2d(1, 256, kernel_size=9)
         self.convcaps = ConvCapsule(inC=256, outC=32, capsDim=8, stride=2,
                                     kernel=9)
         self.caps = Capsule(nOutCaps=10, outCapsDim=16, nInCaps=32*6*6,
-                            inCapsDim=8, nRouting=3)
+                            inCapsDim=8, nRouting=3, detach=detach)
         self.decoder = Reconstructor(nCaps=10, capsDim=16)
 
     def forward(self, x, labels=None):
@@ -154,12 +160,11 @@ class MarginLoss(nn.Module):
         idx = torch.zeros(pred.size())
         if pred.is_cuda:
             idx = idx.cuda()
-        idx = idx.scatter_(1, label.data.view(-1, 1), 1) # one-hot!
+        idx = idx.scatter_(1, label.data.view(-1, 1), 1.0) # one-hot!
         idx = Variable(idx)
-        idx = idx.float()
-        loss_plus = F.relu(self.mplus - pred).pow(2)
-        loss_minus = F.relu(pred - self.mminus).pow(2)
-        loss = (idx * loss_plus) + (self._lambda * (1. - idx) * loss_minus)
+        loss_plus = F.relu(self.mplus - pred).pow(2) * idx
+        loss_minus = F.relu(pred - self.mminus).pow(2) * (1. - idx)
+        loss = loss_plus + (self._lambda * loss_minus)
         lval = loss.sum()
         if recon is not None:
             return lval + self.recon_weight * F.mse_loss(recon, data)
@@ -170,7 +175,6 @@ def train(epoch_id, model, loader, loss, optimizer, recon):
     start = time.time()
     loss_val = 0.0
     accuracy = 0.0
-    model.train()
     for idx, (data, label) in enumerate(loader):
         if torch.cuda.is_available():
             data, label = data.cuda(), label.cuda()
@@ -186,6 +190,8 @@ def train(epoch_id, model, loader, loss, optimizer, recon):
         loss_val += lval.data[0]
         _, pred = output[0].data.max(dim=-1)  # argmax
         accuracy += pred.eq(label.data.view_as(pred)).sum()
+        print("Train epoch:%d idx=%d time(s):%.3f loss=%.8f accuracy:%.4f" % \
+              (epoch_id, idx, 0, loss_val, accuracy))
     loss_val /= len(loader.dataset)
     accuracy /= len(loader.dataset)
     total = time.time() - start
@@ -219,6 +225,8 @@ if __name__ == "__main__":
                         help="Use ADAM as the optimizer (Default SGD)")
     parser.add_argument("-batch-size", type=int, default=128,
                         help="Input batch size for training")
+    parser.add_argument("-detach", default=False, action="store_true",
+                        help="Detach uhat during routing, except last iter")
     parser.add_argument("-epoch", type=int, default=10, help="Training epochs")
     parser.add_argument("-lr", type=float, default=0.1, help="Learning Rate")
     parser.add_argument("-mom", type=float, default=0.9,
@@ -241,7 +249,7 @@ if __name__ == "__main__":
     train_loader, test_loader = get_loaders(trainset, testset, args.batch_size,
                                             args.test_batch_size, args.shuffle)
     print("Preparing model/loss-function/optimizer...")
-    model = CapsuleNetwork()
+    model = CapsuleNetwork(args.detach)
     if torch.cuda.is_available():
         model.cuda()
     loss = MarginLoss(0.9, 0.5, 0.1, 0.0005)
