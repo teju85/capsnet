@@ -113,9 +113,10 @@ class Capsule(nn.Module):
             c = c.unsqueeze(3)
             s = torch.sum(c * uhat, dim=1)
             v = squash(s)
-            v1 = v.unsqueeze(1)
-            a = torch.sum(uhat * v1, dim=-1)
-            b = b + a
+            if i != self.r - 1:
+                v1 = v.unsqueeze(1)
+                a = torch.sum(uhat * v1, dim=-1)
+                b = b + a
         return v
 
 class CapsuleNetwork(nn.Module):
