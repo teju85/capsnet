@@ -141,7 +141,7 @@ class CapsuleNetwork(nn.Module):
         x = F.relu(x)
         x = self.convcaps(x)
         x = self.caps(x)
-        pred = torch.sqrt(torch.sum(x.pow(2), dim=-1))
+        pred = x.norm(dim=-1)
         if labels is not None:
             recon = self.decoder(x, labels)
         else:
