@@ -61,7 +61,7 @@ class Reconstructor(nn.Module):
         x = F.relu(self.fc1(activities))
         x = F.relu(self.fc2(x))
         x = F.sigmoid(self.fc3(x))
-        x = x.unsqueeze(dim=1)
+        x = x.view(x.size(0), 1, 28, 28)
         return x
 
 def squash(x, dim=-1):
@@ -165,7 +165,7 @@ class MarginLoss(nn.Module):
         return lval
 
 
-def train(epoch_id, model, loader, loss, optimizer):
+def train(epoch_id, model, loader, loss, optimizer, recon):
     start = time.time()
     loss_val = 0.0
     accuracy = 0.0
@@ -175,7 +175,10 @@ def train(epoch_id, model, loader, loss, optimizer):
             data, label = data.cuda(), label.cuda()
         data, label = Variable(data), Variable(label)
         optimizer.zero_grad()
-        output = model(data)
+        if recon:
+            output = model(data, label)
+        else:
+            output = model(data)
         lval = loss(output, data, label)
         lval.backward()
         optimizer.step()
@@ -216,6 +219,8 @@ if __name__ == "__main__":
     parser.add_argument("-epoch", type=int, default=10, help="Training epochs")
     parser.add_argument("-lr", type=float, default=0.1, help="Learning Rate")
     parser.add_argument("-mom", type=float, default=0.9, help="Momentum")
+    parser.add_argument("-recon", default=False, action="store_true",
+                        help="Enable reconstruction loss")
     parser.add_argument("-root", type=str, default="mnist",
                         help="Directory where to download the mnist dataset")
     parser.add_argument("-shuffle", default=False, action="store_true",
@@ -235,5 +240,5 @@ if __name__ == "__main__":
     optimizer = SGD(model.parameters(), lr=args.lr, momentum=args.mom)
     print("Training loop...")
     for idx in range(0, args.epoch):
-        train(idx, model, train_loader, loss, optimizer)
+        train(idx, model, train_loader, loss, optimizer, args.recon)
         test(idx, model, test_loader, loss)

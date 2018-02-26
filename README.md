@@ -16,3 +16,4 @@ $ ./dockerfiles/scripts/launch -runas user dsb:2018 /bin/bash
 container$ cd /work/capsnet
 container$ env LANG=C.UTF-8 python net.py
 ```
+Use the '-h' option to net.py to know more about its customizations.
