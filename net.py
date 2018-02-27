@@ -9,7 +9,6 @@ from torchvision.transforms import ToTensor
 from torch.autograd import Variable
 import time
 from torch.optim import Adam, SGD
-import math
 
 def get_datasets(root):
     """
@@ -98,10 +97,9 @@ class Capsule(nn.Module):
         self.nInCaps = nInCaps
         self.inCapsDim = inCapsDim
         self.r = nRouting
-        self.W = nn.Parameter(torch.randn(nInCaps, inCapsDim, nOutCaps * outCapsDim))
+        self.W = nn.Parameter(torch.zeros(nInCaps, inCapsDim, nOutCaps * outCapsDim))
         self.detach = detach
-        stdv = 1. / math.sqrt(nInCaps)
-        self.W.data.uniform_(-stdv, stdv)
+        nn.init.kaiming_uniform(self.W)
 
     def forward(self, u):
         b = Variable(torch.zeros(u.size(0), self.nInCaps, self.nOutCaps))
@@ -132,8 +130,7 @@ class CapsuleNetwork(nn.Module):
         self.c1 = nn.Conv2d(1, 256, kernel_size=9)
         self.convcaps = ConvCapsule(inC=256, outC=32, capsDim=8, stride=2,
                                     kernel=9)
-        self.caps = Capsule(nOutCaps=10, outCapsDim=16, nInCaps=32*6*6,
-                            inCapsDim=8, nRouting=3, detach=detach)
+        self.caps = Capsule(10, 16, 32*6*6, 8, 3, detach)
         self.decoder = Reconstructor(nCaps=10, capsDim=16)
 
     def forward(self, x, labels=None):
@@ -166,13 +163,13 @@ class MarginLoss(nn.Module):
         loss_plus = F.relu(self.mplus - pred).pow(2) * idx
         loss_minus = F.relu(pred - self.mminus).pow(2) * (1. - idx)
         loss = loss_plus + (self._lambda * loss_minus)
-        lval = loss.sum()
+        lval = loss.sum(dim=1).mean()
         if recon is not None:
             return lval + self.recon_weight * F.mse_loss(recon, data)
         return lval
 
 
-def train(epoch_id, model, loader, loss, optimizer, recon):
+def train(epoch_id, model, loader, loss, optimizer, recon, max_idx):
     start = time.time()
     loss_val = 0.0
     accuracy = 0.0
@@ -191,8 +188,8 @@ def train(epoch_id, model, loader, loss, optimizer, recon):
         loss_val += lval.data[0]
         _, pred = output[0].data.max(dim=-1)  # argmax
         accuracy += pred.eq(label.data.view_as(pred)).sum()
-        # print("Train epoch:%d idx=%d time(s):%.3f loss=%.8f accuracy:%.4f" % \
-        #       (epoch_id, idx, 0, loss_val, accuracy))
+        if idx == max_idx:
+            break
     loss_val /= len(loader.dataset)
     accuracy /= len(loader.dataset)
     total = time.time() - start
@@ -230,8 +227,12 @@ if __name__ == "__main__":
                         help="Detach uhat during routing, except last iter")
     parser.add_argument("-epoch", type=int, default=10, help="Training epochs")
     parser.add_argument("-lr", type=float, default=0.1, help="Learning Rate")
+    parser.add_argument("-max-idx", type=int, default=-1,
+                        help="Max batches to run per epoch (debug-only)")
     parser.add_argument("-mom", type=float, default=0.9,
                         help="Momentum (SGD only)")
+    parser.add_argument("-no-test", default=False, action="store_true",
+                        help="Don't run validation (debug-only)")
     parser.add_argument("-recon", default=False, action="store_true",
                         help="Enable reconstruction loss")
     parser.add_argument("-root", type=str, default="mnist",
@@ -260,5 +261,7 @@ if __name__ == "__main__":
         optimizer = SGD(model.parameters(), lr=args.lr, momentum=args.mom)
     print("Training loop...")
     for idx in range(0, args.epoch):
-        train(idx, model, train_loader, loss, optimizer, args.recon)
-        test(idx, model, test_loader, loss)
+        train(idx, model, train_loader, loss, optimizer, args.recon,
+              args.max_idx)
+        if not args.no_test:
+            test(idx, model, test_loader, loss)
