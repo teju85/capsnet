@@ -251,7 +251,7 @@ if __name__ == "__main__":
     train_loader, test_loader = get_loaders(trainset, testset, args.batch_size,
                                             args.test_batch_size, args.shuffle)
     print("Preparing model/loss-function/optimizer...")
-    model = CapsuleNetwork(!args.no_detach)
+    model = CapsuleNetwork(not args.no_detach)
     if torch.cuda.is_available():
         model.cuda()
     # TODO: customize these params?
