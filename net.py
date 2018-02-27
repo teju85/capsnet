@@ -223,14 +223,14 @@ if __name__ == "__main__":
                         help="Use ADAM as the optimizer (Default SGD)")
     parser.add_argument("-batch-size", type=int, default=128,
                         help="Input batch size for training")
-    parser.add_argument("-detach", default=False, action="store_true",
-                        help="Detach uhat during routing, except last iter")
-    parser.add_argument("-epoch", type=int, default=10, help="Training epochs")
+    parser.add_argument("-epoch", type=int, default=50, help="Training epochs")
     parser.add_argument("-lr", type=float, default=0.1, help="Learning Rate")
     parser.add_argument("-max-idx", type=int, default=-1,
                         help="Max batches to run per epoch (debug-only)")
     parser.add_argument("-mom", type=float, default=0.9,
                         help="Momentum (SGD only)")
+    parser.add_argument("-no-detach", default=False, action="store_true",
+                        help="Don't detach uhat while routing except last iter")
     parser.add_argument("-no-test", default=False, action="store_true",
                         help="Don't run validation (debug-only)")
     parser.add_argument("-recon", default=False, action="store_true",
@@ -251,9 +251,10 @@ if __name__ == "__main__":
     train_loader, test_loader = get_loaders(trainset, testset, args.batch_size,
                                             args.test_batch_size, args.shuffle)
     print("Preparing model/loss-function/optimizer...")
-    model = CapsuleNetwork(args.detach)
+    model = CapsuleNetwork(!args.no_detach)
     if torch.cuda.is_available():
         model.cuda()
+    # TODO: customize these params?
     loss = MarginLoss(0.9, 0.5, 0.1, 0.0005*28*28)
     if args.adam:
         optimizer = Adam(model.parameters(), lr=args.lr)
