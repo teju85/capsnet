@@ -6,7 +6,7 @@ results in pytorch.
 * Pre-reqs are found [here](https://github.com/teju85/dockerfiles#pre-reqs)
 * git clone https://github.com/teju85/dockerfiles
 * cd dockerfiles/ubuntu1604
-* make dsb-2018
+* make pytorch90_70
 * cd ../..
 * git clone https://github.com/teju85/capsnet
 

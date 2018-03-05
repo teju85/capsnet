@@ -42,13 +42,13 @@ def get_loaders(trainset, testset, batch_size, test_batch_size, shuffle):
     return train_loader, test_loader
 
 class Reconstructor(nn.Module):
-    def __init__(self, nCaps, capsDim):
+    def __init__(self, nCaps, capsDim, outDim):
         super(Reconstructor, self).__init__()
         self.nCaps = nCaps
         self.capsDim = capsDim
         self.fc1 = nn.Linear(nCaps*capsDim, 512)
         self.fc2 = nn.Linear(512, 1024)
-        self.fc3 = nn.Linear(1024, 784)
+        self.fc3 = nn.Linear(1024, outDim)
 
     def forward(self, x, labels):
         idx = Variable(torch.zeros(x.size(0), self.nCaps), requires_grad=False)
@@ -125,27 +125,6 @@ class Capsule(nn.Module):
                 b = b + a
         return v
 
-class CapsuleNetwork(nn.Module):
-    def __init__(self, detach):
-        super(CapsuleNetwork, self).__init__()
-        self.c1 = nn.Conv2d(1, 256, kernel_size=9)
-        self.convcaps = ConvCapsule(inC=256, outC=32, capsDim=8, stride=2,
-                                    kernel=9)
-        self.caps = Capsule(10, 16, 32*6*6, 8, 3, detach)
-        self.decoder = Reconstructor(nCaps=10, capsDim=16)
-
-    def forward(self, x, labels=None):
-        x = self.c1(x)
-        x = F.relu(x)
-        x = self.convcaps(x)
-        x = self.caps(x)
-        pred = x.norm(dim=-1)
-        if labels is not None:
-            recon = self.decoder(x, labels)
-        else:
-            recon = None
-        return pred, recon, x
-
 class MarginLoss(nn.Module):
     def __init__(self, mplus, _lambda, mminus, recon_weight):
         super(MarginLoss, self).__init__()
@@ -169,6 +148,27 @@ class MarginLoss(nn.Module):
             return lval + self.recon_weight * F.mse_loss(recon, data)
         return lval
 
+class MnistCapsuleNet(nn.Module):
+    def __init__(self, detach):
+        super(MnistCapsuleNet, self).__init__()
+        self.c1 = nn.Conv2d(1, 256, kernel_size=9)
+        self.convcaps = ConvCapsule(inC=256, outC=32, capsDim=8, stride=2,
+                                    kernel=9)
+        self.caps = Capsule(10, 16, 32*6*6, 8, 3, detach)
+        self.decoder = Reconstructor(nCaps=10, capsDim=16, outDim=784)
+
+    def forward(self, x, labels=None):
+        x = self.c1(x)
+        x = F.relu(x)
+        x = self.convcaps(x)
+        x = self.caps(x)
+        pred = x.norm(dim=-1)
+        if labels is not None:
+            recon = self.decoder(x, labels)
+        else:
+            recon = None
+        return pred, recon, x
+
 
 def train(epoch_id, model, loader, loss, optimizer, recon, max_idx):
     start = time.time()
@@ -186,9 +186,9 @@ def train(epoch_id, model, loader, loss, optimizer, recon, max_idx):
         lval = loss(output, data, label)
         lval.backward()
         optimizer.step()
-        loss_val += lval.data[0]
+        loss_val += lval.item()
         _, pred = output[0].data.max(dim=-1)  # argmax
-        accuracy += pred.eq(label.data.view_as(pred)).sum()
+        accuracy += pred.eq(label.data.view_as(pred)).float().sum()
         if idx == max_idx:
             break
     loss_val /= len(loader.dataset)
@@ -207,9 +207,9 @@ def test(epoch_id, model, loader, loss):
             data, label = data.cuda(), label.cuda()
         data, label = Variable(data), Variable(label)
         output = model(data)
-        loss_val += loss(output, data, label).data[0]
+        loss_val += loss(output, data, label).item()
         _, pred = output[0].data.max(1)  # argmax
-        accuracy += pred.eq(label.data.view_as(pred)).sum()
+        accuracy += pred.eq(label.data.view_as(pred)).float().sum()
     loss_val /= len(loader.dataset)
     accuracy /= len(loader.dataset)
     total = time.time() - start
@@ -225,11 +225,17 @@ if __name__ == "__main__":
     parser.add_argument("-batch-size", type=int, default=128,
                         help="Input batch size for training")
     parser.add_argument("-epoch", type=int, default=50, help="Training epochs")
+    parser.add_argument("-lambda-recon", type=float, default=0.0005*28*28,
+                        help="Reconstruction-loss weight")
     parser.add_argument("-lr", type=float, default=0.1, help="Learning Rate")
     parser.add_argument("-max-idx", type=int, default=-1,
                         help="Max batches to run per epoch (debug-only)")
     parser.add_argument("-mom", type=float, default=0.9,
                         help="Momentum (SGD only)")
+    parser.add_argument("-mlambda", type=float, default=0.5,
+                        help="MarginLoss lambda")
+    parser.add_argument("-mminus", type=float, default=0.1, help="MarginLoss m-")
+    parser.add_argument("-mplus", type=float, default=0.9, help="MarginLoss m+")
     parser.add_argument("-no-detach", default=False, action="store_true",
                         help="Don't detach uhat while routing except last iter")
     parser.add_argument("-no-test", default=False, action="store_true",
@@ -254,21 +260,18 @@ if __name__ == "__main__":
     train_loader, test_loader = get_loaders(trainset, testset, args.batch_size,
                                             args.test_batch_size, args.shuffle)
     print("Preparing model/loss-function/optimizer...")
-    model = CapsuleNetwork(not args.no_detach)
+    profiler.emit_nvtx(enabled=args.profile)
+    model = MnistCapsuleNet(not args.no_detach)
     if torch.cuda.is_available():
         model.cuda()
-    # TODO: customize these params?
-    loss = MarginLoss(0.9, 0.5, 0.1, 0.0005*28*28)
+    loss = MarginLoss(args.mplus, args.mlambda, args.mminus, args.lambda_recon)
     if args.adam:
         optimizer = Adam(model.parameters(), lr=args.lr)
     else:
         optimizer = SGD(model.parameters(), lr=args.lr, momentum=args.mom)
     print("Training loop...")
-    with profiler.profile(enabled=args.profile) as prof:
-        for idx in range(0, args.epoch):
-            train(idx, model, train_loader, loss, optimizer, args.recon,
-                  args.max_idx)
-            if not args.no_test:
-                test(idx, model, test_loader, loss)
-    if args.profile:
-        print(prof.key_averages())
+    for idx in range(0, args.epoch):
+        train(idx, model, train_loader, loss, optimizer, args.recon,
+              args.max_idx)
+        if not args.no_test:
+            test(idx, model, test_loader, loss)
