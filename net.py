@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from torchvision.datasets import MNIST
 from torchvision.transforms import ToTensor
 from torch.autograd import Variable
+from torch.autograd import profiler
 import time
 from torch.optim import Adam, SGD
 
@@ -233,6 +234,8 @@ if __name__ == "__main__":
                         help="Don't detach uhat while routing except last iter")
     parser.add_argument("-no-test", default=False, action="store_true",
                         help="Don't run validation (debug-only)")
+    parser.add_argument("-profile", default=False, action="store_true",
+                        help="Profile the runtimes to gather perf info")
     parser.add_argument("-recon", default=False, action="store_true",
                         help="Enable reconstruction loss")
     parser.add_argument("-root", type=str, default="mnist",
@@ -261,8 +264,11 @@ if __name__ == "__main__":
     else:
         optimizer = SGD(model.parameters(), lr=args.lr, momentum=args.mom)
     print("Training loop...")
-    for idx in range(0, args.epoch):
-        train(idx, model, train_loader, loss, optimizer, args.recon,
-              args.max_idx)
-        if not args.no_test:
-            test(idx, model, test_loader, loss)
+    with profiler.profile(enabled=args.profile) as prof:
+        for idx in range(0, args.epoch):
+            train(idx, model, train_loader, loss, optimizer, args.recon,
+                  args.max_idx)
+            if not args.no_test:
+                test(idx, model, test_loader, loss)
+    if args.profile:
+        print(prof.key_averages())
