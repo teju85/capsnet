@@ -4,14 +4,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from torchvision.datasets import MNIST
+from torchvision.datasets import MNIST, CIFAR10
 from torchvision.transforms import ToTensor
 from torch.autograd import Variable
 from torch.autograd import profiler
 import time
 from torch.optim import Adam, SGD
 
-def get_datasets(root):
+def __get_datasets(root):
     """
     Helper function to download, prepare and return the MNIST datasets for
     training/testing, respectively.
@@ -19,36 +19,45 @@ def get_datasets(root):
     . root - folder where to download and prepare the dataset
     Output: training and testing sets, respectively
     """
-    trainset = MNIST(root, train=True, download=True, transform=ToTensor())
-    testset = MNIST(root, train=False, download=True, transform=ToTensor())
+    if root == "mnist":
+        trainset = MNIST(root, train=True, download=True, transform=ToTensor())
+        testset = MNIST(root, train=False, download=True, transform=ToTensor())
+    elif root == "cifar10":
+        trainset = CIFAR10(root, train=True, download=True, transform=ToTensor())
+        testset = CIFAR10(root, train=False, download=True, transform=ToTensor())
+    else:
+        trainset, testset = None, None
     return trainset, testset
 
-def get_loaders(trainset, testset, batch_size, test_batch_size, shuffle):
+def get_loaders(args): #trainset, testset, batch_size, test_batch_size, shuffle):
     """
-    Prepare DataLoader wrappers for training and testing set, respectively.
+    Download and prepare DataLoader wrappers for training and testing sets.
     Args:
-    . trainset - training set
-    . testset - testing set
+    . args - all commandline args passed
     . batch_size - batch size during training
     . test_batch_size - batch size during testing
     . shuffle - whether to shuffle inputs
     Output: dataloaders for training set and testing set, respectively
     """
+    trainset, testset = __get_datasets(args.root)
     pin_memory = True if torch.cuda.is_available() else False
-    train_loader = DataLoader(trainset, batch_size=batch_size, shuffle=shuffle,
-                              pin_memory=pin_memory)
-    test_loader = DataLoader(testset, batch_size=test_batch_size,
-                             shuffle=shuffle, pin_memory=pin_memory)
+    train_loader = DataLoader(trainset, batch_size=args.batch_size,
+                              shuffle=args.shuffle, pin_memory=pin_memory)
+    test_loader = DataLoader(testset, batch_size=args.test_batch_size,
+                             shuffle=args.shuffle, pin_memory=pin_memory)
     return train_loader, test_loader
 
+
+# TODO: parameterize the hard-coded Linear dimensions
 class Reconstructor(nn.Module):
-    def __init__(self, nCaps, capsDim, outDim):
+    def __init__(self, nCaps, capsDim, outDim, outImgDim):
         super(Reconstructor, self).__init__()
         self.nCaps = nCaps
         self.capsDim = capsDim
         self.fc1 = nn.Linear(nCaps*capsDim, 512)
         self.fc2 = nn.Linear(512, 1024)
         self.fc3 = nn.Linear(1024, outDim)
+        self.outImgDim = outImgDim
 
     def forward(self, x, labels):
         idx = Variable(torch.zeros(x.size(0), self.nCaps), requires_grad=False)
@@ -61,7 +70,8 @@ class Reconstructor(nn.Module):
         x = F.relu(self.fc1(activities))
         x = F.relu(self.fc2(x))
         x = F.sigmoid(self.fc3(x))
-        x = x.view(x.size(0), 1, 28, 28)
+        x = x.view(x.size(0), self.outImgDim[0],
+                   self.outImgDim[1], self.outImgDim[2])
         return x
 
 def squash(x, dim=-1):
@@ -89,6 +99,7 @@ class ConvCapsule(nn.Module):
         out = out.view(a, b*c*d, e)
         out = squash(out)
         return out
+
 
 class Capsule(nn.Module):
     def __init__(self, nOutCaps, outCapsDim, nInCaps, inCapsDim, nRouting, detach):
@@ -125,6 +136,7 @@ class Capsule(nn.Module):
                 b = b + a
         return v
 
+
 class MarginLoss(nn.Module):
     def __init__(self, mplus, _lambda, mminus, recon_weight):
         super(MarginLoss, self).__init__()
@@ -148,14 +160,17 @@ class MarginLoss(nn.Module):
             return lval + self.recon_weight * F.mse_loss(recon, data)
         return lval
 
+
 class MnistCapsuleNet(nn.Module):
-    def __init__(self, detach):
+    def __init__(self, detach, nrouting):
         super(MnistCapsuleNet, self).__init__()
         self.c1 = nn.Conv2d(1, 256, kernel_size=9)
         self.convcaps = ConvCapsule(inC=256, outC=32, capsDim=8, stride=2,
                                     kernel=9)
-        self.caps = Capsule(10, 16, 32*6*6, 8, 3, detach)
-        self.decoder = Reconstructor(nCaps=10, capsDim=16, outDim=784)
+        self.caps = Capsule(10, 16, 32*6*6, 8, nrouting, detach)
+        imSize = 28
+        self.decoder = Reconstructor(nCaps=10, capsDim=16, outDim=imSize*imSize,
+                                     outImgDim=(1, imSize, imSize))
 
     def forward(self, x, labels=None):
         x = self.c1(x)
@@ -168,6 +183,53 @@ class MnistCapsuleNet(nn.Module):
         else:
             recon = None
         return pred, recon, x
+
+
+class Cifar10CapsuleNet(nn.Module):
+    def __init__(self, detach, nrouting):
+        super(Cifar10CapsuleNet, self).__init__()
+        self.c1 = nn.Conv2d(3, 256, kernel_size=9)
+        self.convcaps = ConvCapsule(inC=256, outC=32, capsDim=8, stride=2,
+                                    kernel=9)
+        self.caps = Capsule(10, 16, 32*8*8, 8, nrouting, detach)
+        imSize = 32
+        self.decoder = Reconstructor(nCaps=10, capsDim=16, outDim=imSize*imSize,
+                                     outImgDim=(1, imSize, imSize))
+
+    def forward(self, x, labels=None):
+        x = self.c1(x)
+        x = F.relu(x)
+        x = self.convcaps(x)
+        x = self.caps(x)
+        pred = x.norm(dim=-1)
+        if labels is not None:
+            recon = self.decoder(x, labels)
+        else:
+            recon = None
+        return pred, recon, x
+
+
+def get_model(args):
+    if args.root == "mnist":
+        model = MnistCapsuleNet(not args.no_detach, args.nrouting)
+    elif args.root == "cifar10":
+        model = Cifar10CapsuleNet(not args.no_detach, args.nrouting)
+    else:
+        model = None
+    return model
+
+
+def get_loss(args):
+    loss = MarginLoss(args.mplus, args.mlambda, args.mminus, args.lambda_recon)
+    return loss
+
+
+def get_optimizer(args):
+    if args.adam:
+        optimizer = Adam(model.parameters(), lr=args.lr)
+    else:
+        optimizer = SGD(model.parameters(), lr=args.lr, momentum=args.mom)
+    return optimizer
 
 
 def train(epoch_id, model, loader, loss, optimizer, recon, max_idx):
@@ -186,7 +248,7 @@ def train(epoch_id, model, loader, loss, optimizer, recon, max_idx):
         lval = loss(output, data, label)
         lval.backward()
         optimizer.step()
-        loss_val += lval.item()
+        loss_val += lval.data[0]
         _, pred = output[0].data.max(dim=-1)  # argmax
         accuracy += pred.eq(label.data.view_as(pred)).float().sum()
         if idx == max_idx:
@@ -196,6 +258,7 @@ def train(epoch_id, model, loader, loss, optimizer, recon, max_idx):
     total = time.time() - start
     print("Train epoch:%d time(s):%.3f loss=%.8f accuracy:%.4f" % \
           (epoch_id, total, loss_val, accuracy))
+
 
 def test(epoch_id, model, loader, loss):
     start = time.time()
@@ -207,7 +270,7 @@ def test(epoch_id, model, loader, loss):
             data, label = data.cuda(), label.cuda()
         data, label = Variable(data), Variable(label)
         output = model(data)
-        loss_val += loss(output, data, label).item()
+        loss_val += loss(output, data, label).data[0]
         _, pred = output[0].data.max(1)  # argmax
         accuracy += pred.eq(label.data.view_as(pred)).float().sum()
     loss_val /= len(loader.dataset)
@@ -215,6 +278,7 @@ def test(epoch_id, model, loader, loss):
     total = time.time() - start
     print("Test epoch:%d time(s):%.3f loss=%.8f accuracy:%.4f" % \
           (epoch_id, total, loss_val, accuracy))
+
 
 if __name__ == "__main__":
     import argparse
@@ -240,11 +304,14 @@ if __name__ == "__main__":
                         help="Don't detach uhat while routing except last iter")
     parser.add_argument("-no-test", default=False, action="store_true",
                         help="Don't run validation (debug-only)")
+    parser.add_argument("-nrouting", type=int, default=3,
+                        help="Num routing iterations")
     parser.add_argument("-profile", default=False, action="store_true",
                         help="Profile the runtimes to gather perf info")
     parser.add_argument("-recon", default=False, action="store_true",
                         help="Enable reconstruction loss")
-    parser.add_argument("-root", type=str, default="mnist",
+    parser.add_argument("-root", type=str, choices=("mnist", "cifar10"),
+                        default="mnist",
                         help="Directory where to download the mnist dataset")
     parser.add_argument("-seed", type=int, default=12345,
                         help="Random seed for number generation")
@@ -256,19 +323,14 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
     print("Loading datasets...")
-    trainset, testset = get_datasets(args.root)
-    train_loader, test_loader = get_loaders(trainset, testset, args.batch_size,
-                                            args.test_batch_size, args.shuffle)
+    train_loader, test_loader = get_loaders(args)
     print("Preparing model/loss-function/optimizer...")
     profiler.emit_nvtx(enabled=args.profile)
-    model = MnistCapsuleNet(not args.no_detach)
+    model = get_model(args)
     if torch.cuda.is_available():
         model.cuda()
-    loss = MarginLoss(args.mplus, args.mlambda, args.mminus, args.lambda_recon)
-    if args.adam:
-        optimizer = Adam(model.parameters(), lr=args.lr)
-    else:
-        optimizer = SGD(model.parameters(), lr=args.lr, momentum=args.mom)
+    loss = get_loss(args)
+    optimizer = get_optimizer(args)
     print("Training loop...")
     for idx in range(0, args.epoch):
         train(idx, model, train_loader, loss, optimizer, args.recon,

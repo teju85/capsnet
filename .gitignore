@@ -1,5 +1,5 @@
-mnist/
-core
 __pycache__/
+cifar10/
+core
 logs/
-
+mnist/
