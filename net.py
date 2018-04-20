@@ -111,7 +111,7 @@ class Capsule(nn.Module):
         self.r = nRouting
         self.W = nn.Parameter(torch.zeros(nInCaps, inCapsDim, nOutCaps * outCapsDim))
         self.detach = detach
-        nn.init.kaiming_uniform(self.W)
+        nn.init.kaiming_uniform_(self.W)
 
     def forward(self, u):
         b = Variable(torch.zeros(u.size(0), self.nInCaps, self.nOutCaps))
@@ -248,7 +248,7 @@ def train(epoch_id, model, loader, loss, optimizer, recon, max_idx):
         lval = loss(output, data, label)
         lval.backward()
         optimizer.step()
-        loss_val += lval.data[0]
+        loss_val += lval.item()
         _, pred = output[0].data.max(dim=-1)  # argmax
         accuracy += pred.eq(label.data.view_as(pred)).float().sum()
         if idx == max_idx:
