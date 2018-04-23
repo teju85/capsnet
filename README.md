@@ -24,6 +24,7 @@ Use the '-h' option to net.py to know more about its customizations.
 * accuracy numbers are ratios between 0 and 1
 * train and test timings are in seconds
 * recon - whether or not the reconstruction loss was enabled
+
 | Dataset | recon? | uhat?      | Train accuracy | Train time | Test accuracy | Test time |
 |---------|--------|------------|----------------|------------|---------------|-----------|
 | mnist   | no     | detach     | 0.9986         | 40.344     | 0.9938        | 2.717     |
