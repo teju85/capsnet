@@ -19,21 +19,25 @@ container$ env LANG=C.UTF-8 python net.py
 Use the '-h' option to net.py to know more about its customizations.
 
 # Accuracy/Perf Numbers
-* uhat detach - detaching means to perform backprop only for the last routing iteration
+* uhat detach - detaching here means to perform backprop only for the last routing iteration
 * training epochs of 50 is being used for comparisons below
 * accuracy numbers are ratios between 0 and 1
-* train and test timings are in seconds
+* train and test timings are in seconds and are per epoch
 * recon - whether or not the reconstruction loss was enabled
+* measurements are all taken on a P100, running on cuda 9.0 with cudnn 7.0
 
 | Dataset | recon? | uhat?      | Train accuracy | Train time | Test accuracy | Test time |
 |---------|--------|------------|----------------|------------|---------------|-----------|
-| mnist   | no     | detach     | 0.9986         | 40.344     | 0.9938        | 2.717     |
-| mnist   | no     | not detach | 0.9996         | 47.462     | 0.9934        | 2.765     |
-| cifar   | no     | detach     | 0.9832         | 53.560     | 0.6218        | 5.017     |
+| mnist   | no     | detach     | 0.9985         | 34.699     | 0.9939        | 2.476     |
+| mnist   | no     | no detach  | 0.9996         | 40.112     | 0.9935        | 2.406     |
+| mnist   | yes    | detach     | 0.9986         | 35.955     | 0.9938        | 2.438     |
+| cifar   | no     | detach     | 0.9827         | 46.349     | 0.6150        | 3.918     |
+| cifar   | yes    | detach     | 0.9834         | 47.594     | 0.6333        | 4.086     |
 
-## Note
+# Notes
+## w/ v/s w/o detach
 Since w/ and w/o detach really doesn't seem to cause huge differences in
-accuracy, but w/ detach runs ~17% faster than w/o it, detach has been made the
+accuracy, but w/ detach runs ~16% faster than w/o it, detach has been made the
 default behavior in this repo.
 
 ## Regarding Cifar10
@@ -42,5 +46,5 @@ error. In here, we only run one model and that too keeping most of the
 hyper-params pretty much the same as those with MNIST.
 
 ## Runtime differences between Cifar10 and Mnist
-~30% increase in runtime when compared to Mnist is totally attributable to the
+The increase in runtime when compared to Mnist is totally attributable to the
 difference in input image dimension between these 2 datasets.

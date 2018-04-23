@@ -193,8 +193,8 @@ class Cifar10CapsuleNet(nn.Module):
                                     kernel=9)
         self.caps = Capsule(10, 16, 32*8*8, 8, nrouting, detach)
         imSize = 32
-        self.decoder = Reconstructor(nCaps=10, capsDim=16, outDim=imSize*imSize,
-                                     outImgDim=(1, imSize, imSize))
+        self.decoder = Reconstructor(nCaps=10, capsDim=16, outDim=3*imSize*imSize,
+                                     outImgDim=(3, imSize, imSize))
 
     def forward(self, x, labels=None):
         x = self.c1(x)
