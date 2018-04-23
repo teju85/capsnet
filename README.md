@@ -19,43 +19,27 @@ container$ env LANG=C.UTF-8 python net.py
 Use the '-h' option to net.py to know more about its customizations.
 
 # Accuracy/Perf Numbers
-## Mnist
-### commandline
-```bash
-container$ env LANG=C.UTF-8 python net.py
-```
+* uhat detach - detaching means to perform backprop only for the last routing iteration
+* training epochs of 50 is being used for comparisons below
+* accuracy numbers are ratios between 0 and 1
+* train and test timings are in seconds
+* recon - whether or not the reconstruction loss was enabled
+| Dataset | recon? | uhat?      | Train accuracy | Train time | Test accuracy | Test time |
+|---------|--------|------------|----------------|------------|---------------|-----------|
+| mnist   | no     | detach     | 0.9986         | 40.344     | 0.9938        | 2.717     |
+| mnist   | no     | not detach | 0.9996         | 47.462     | 0.9934        | 2.765     |
+| cifar   | no     | detach     | 0.9832         | 53.560     | 0.6218        | 5.017     |
 
-### With uhat detach
-Detaching uhat means to perform back-prop only for the last routing iteration.
-```bash
-Train epoch:49 time(s):40.344 loss=0.00019366 accuracy:0.9986
-Test epoch:49 time(s):2.717 loss=0.00003051 accuracy:0.9938
-```
-
-### Without uhat detach
-```bash
-Train epoch:49 time(s):47.462 loss=0.00017785 accuracy:0.9996
-Test epoch:49 time(s):2.765 loss=0.00002714 accuracy:0.9934
-```
-
+## Note
 Since w/ and w/o detach really doesn't seem to cause huge differences in
 accuracy, but w/ detach runs ~17% faster than w/o it, detach has been made the
 default behavior in this repo.
 
-## Cifar10
+## Regarding Cifar10
 Main paper runs this dataset using an ensemble of 7 models to attain 10.6% test
 error. In here, we only run one model and that too keeping most of the
 hyper-params pretty much the same as those with MNIST.
 
-### commandline
-```bash
-container$ env LANG=C.UTF-8 python net.py -root cifar10
-```
-
-### With uhat detach
-```bash
-Train epoch:49 time(s):53.560 loss=0.00046036 accuracy:0.9832
-Test epoch:49 time(s):5.017 loss=0.00119105 accuracy:0.6218
-```
+## Runtime differences between Cifar10 and Mnist
 ~30% increase in runtime when compared to Mnist is totally attributable to the
 difference in input image dimension between these 2 datasets.
