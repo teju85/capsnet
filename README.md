@@ -14,32 +14,41 @@ results in pytorch.
 ```bash
 $ ./dockerfiles/scripts/launch -runas user pytorch:latest-90_70 /bin/bash
 container$ cd /work/capsnet
-container$ env LANG=C.UTF-8 python net.py
+container$ python net.py
 ```
 Use the '-h' option to net.py to know more about its customizations.
 
+# Benchmarking
+```bash
+$ ./dockerfiles/scripts/launch -runas user pytorch:latest-90_70 /bin/bash
+container$ cd /work/capsnet
+container$ ./benchmark.sh
+```
+
 # Accuracy/Perf Numbers
 * uhat detach - detaching here means to perform backprop only for the last routing iteration
-* training epochs of 50 is being used for comparisons below
+* training epochs of 25 is being used for comparisons below
 * accuracy numbers are ratios between 0 and 1
 * train and test timings are in seconds and are per epoch
-* recon - whether or not the reconstruction loss was enabled
-* measurements are all taken on a P100, running on cuda 9.0 with cudnn 7.0
+* measurements are all taken using cuda 9.0 with cudnn 7.0
 
-| Dataset | recon? | uhat?      | Train accuracy | Train time | Test accuracy | Test time |
-|---------|--------|------------|----------------|------------|---------------|-----------|
-| mnist   | no     | detach     | 0.9985         | 34.699     | 0.9939        | 2.476     |
-| mnist   | no     | no detach  | 0.9996         | 40.112     | 0.9935        | 2.406     |
-| mnist   | yes    | detach     | 0.9986         | 35.955     | 0.9938        | 2.438     |
-| cifar   | no     | detach     | 0.9827         | 46.349     | 0.6150        | 3.918     |
-| cifar   | yes    | detach     | 0.9834         | 47.594     | 0.6333        | 4.086     |
+## P100
+| Dataset  | detach? | Train acc | Train time | Test acc | Test time |
+|----------|---------|-----------|------------|----------|-----------|
+|    mnist |      no |    0.9953 |     41.269 |   0.9920 |     2.463 |
+|    mnist |     yes |    0.9927 |     35.511 |   0.9909 |     2.580 |
+|  cifar10 |      no |    0.8693 |     54.802 |   0.6422 |     4.250 |
+|  cifar10 |     yes |    0.8281 |     45.726 |   0.6690 |     3.969 |
+
+## V100
+| Dataset  | detach? | Train acc | Train time | Test acc | Test time |
+|----------|---------|-----------|------------|----------|-----------|
+|    mnist |      no |    0.9953 |     24.670 |   0.9920 |     1.766 |
+|    mnist |     yes |    0.9927 |     20.539 |   0.9909 |     1.744 |
+|  cifar10 |      no |    0.8794 |     31.602 |   0.6572 |     2.917 |
+|  cifar10 |     yes |    0.8290 |     26.718 |   0.6733 |     2.950 |
 
 # Notes
-## w/ v/s w/o detach
-Since w/ and w/o detach really doesn't seem to cause huge differences in
-accuracy, but w/ detach runs ~16% faster than w/o it, detach has been made the
-default behavior in this repo.
-
 ## Regarding Cifar10
 Main paper runs this dataset using an ensemble of 7 models to attain 10.6% test
 error. In here, we only run one model and that too keeping most of the

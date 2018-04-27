@@ -111,12 +111,16 @@ class Capsule(nn.Module):
         self.r = nRouting
         self.W = nn.Parameter(torch.zeros(nInCaps, inCapsDim, nOutCaps * outCapsDim))
         self.detach = detach
-        nn.init.kaiming_uniform_(self.W)
+        nn.init.kaiming_uniform(self.W)
 
     def forward(self, u):
         b = Variable(torch.zeros(u.size(0), self.nInCaps, self.nOutCaps))
         if torch.cuda.is_available():
-            b = b.cuda()
+            b = torch.empty(u.size(0), self.nInCaps, self.nOutCaps, device="cuda")
+        else:
+            b = torch.empty(u.size(0), self.nInCaps, self.nOutCaps)
+        b.zero_()
+        b = Variable(b)
         u1 = u.unsqueeze(dim=-1)
         #uhat = u1.matmul(self.W)
         uhat = torch.sum(u1 * self.W, dim=2)
@@ -147,9 +151,11 @@ class MarginLoss(nn.Module):
 
     def forward(self, output, data, label):
         pred, recon, x = output
-        idx = torch.zeros(pred.size())
         if pred.is_cuda:
-            idx = idx.cuda()
+            idx = torch.empty(pred.size(), device="cuda")
+        else:
+            idx = torch.empty(pred.size())
+        idx.zero_()
         idx = idx.scatter_(1, label.data.view(-1, 1), 1.0) # one-hot!
         idx = Variable(idx)
         loss_plus = F.relu(self.mplus - pred).pow(2) * idx
@@ -157,7 +163,7 @@ class MarginLoss(nn.Module):
         loss = loss_plus + (self._lambda * loss_minus)
         lval = loss.sum(dim=1).mean()
         if recon is not None:
-            return lval + self.recon_weight * F.mse_loss(recon, data)
+            lval = lval + self.recon_weight * F.mse_loss(recon, data)
         return lval
 
 
@@ -220,7 +226,14 @@ def get_model(args):
 
 
 def get_loss(args):
-    loss = MarginLoss(args.mplus, args.mlambda, args.mminus, args.lambda_recon)
+    if args.root == "mnist":
+        pixels = 28
+    elif args.root == "cifar10":
+        pixels = 32
+    else:
+        pixels = 1
+    loss = MarginLoss(args.mplus, args.mlambda, args.mminus,
+                      args.lambda_recon * pixels * pixels)
     return loss
 
 
@@ -286,10 +299,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Capsnet Benchmarking")
     parser.add_argument("-adam", default=False, action="store_true",
                         help="Use ADAM as the optimizer (Default SGD)")
-    parser.add_argument("-batch-size", type=int, default=128,
+    parser.add_argument("-batch-size", type=int, default=256,
                         help="Input batch size for training")
     parser.add_argument("-epoch", type=int, default=50, help="Training epochs")
-    parser.add_argument("-lambda-recon", type=float, default=0.0005*28*28,
+    parser.add_argument("-lambda-recon", type=float, default=0.0005,
                         help="Reconstruction-loss weight")
     parser.add_argument("-lr", type=float, default=0.1, help="Learning Rate")
     parser.add_argument("-max-idx", type=int, default=-1,
@@ -308,8 +321,8 @@ if __name__ == "__main__":
                         help="Num routing iterations")
     parser.add_argument("-profile", default=False, action="store_true",
                         help="Profile the runtimes to gather perf info")
-    parser.add_argument("-recon", default=False, action="store_true",
-                        help="Enable reconstruction loss")
+    parser.add_argument("-no-recon", default=False, action="store_true",
+                        help="Disable reconstruction loss")
     parser.add_argument("-root", type=str, choices=("mnist", "cifar10"),
                         default="mnist",
                         help="Directory where to download the mnist dataset")
@@ -317,7 +330,7 @@ if __name__ == "__main__":
                         help="Random seed for number generation")
     parser.add_argument("-shuffle", default=False, action="store_true",
                         help="To shuffle inputs during training/testing or not")
-    parser.add_argument("-test-batch-size", type=int, default=256,
+    parser.add_argument("-test-batch-size", type=int, default=128,
                         help="Input batch size for testing")
     args = parser.parse_args()
     torch.manual_seed(args.seed)
@@ -327,13 +340,14 @@ if __name__ == "__main__":
     print("Preparing model/loss-function/optimizer...")
     profiler.emit_nvtx(enabled=args.profile)
     model = get_model(args)
-    if torch.cuda.is_available():
-        model.cuda()
     loss = get_loss(args)
     optimizer = get_optimizer(args)
+    if torch.cuda.is_available():
+        model.cuda()
+        loss.cuda()
     print("Training loop...")
     for idx in range(0, args.epoch):
-        train(idx, model, train_loader, loss, optimizer, args.recon,
+        train(idx, model, train_loader, loss, optimizer, not args.no_recon,
               args.max_idx)
         if not args.no_test:
             test(idx, model, test_loader, loss)
